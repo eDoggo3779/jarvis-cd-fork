@@ -45,6 +45,7 @@ class Pipeline:
         self.container_host_path = ""  # Docker host path prefix for DinD remapping
         self.container_workspace = ""  # Container workspace root for DinD remapping
         self.container_caps = []  # Apptainer --add-caps (e.g. SYS_ADMIN)
+        self.container_fakeroot = False  # Apptainer --fakeroot at instance start
         self.container_binds = []  # Pipeline-level bind mounts (host:container)
         self.container_gpu = False  # --nv / GPU passthrough
         self.tmp_bind_root = None  # Per-host /tmp redirect root (apptainer)
@@ -319,6 +320,8 @@ class Pipeline:
             pipeline_config['container_workspace'] = self.container_workspace
         if self.container_caps:
             pipeline_config['container_caps'] = self.container_caps
+        if self.container_fakeroot:
+            pipeline_config['container_fakeroot'] = self.container_fakeroot
         if self.container_binds:
             pipeline_config['container_binds'] = self.container_binds
 
@@ -972,6 +975,8 @@ class Pipeline:
         self.container_host_path = pipeline_config.get('container_host_path', '')
         self.container_workspace = pipeline_config.get('container_workspace', '')
         self.container_caps = pipeline_config.get('container_caps', [])
+        self.container_fakeroot = pipeline_config.get(
+            'container_fakeroot', False)
         self.container_binds = Pipeline._expand_env_in_config(
             pipeline_config.get('container_binds', []) or [])
 
@@ -1135,6 +1140,13 @@ class Pipeline:
         # the workload needs (e.g., SYS_ADMIN + /dev/fuse for FUSE mounts)
         # has to be declared at the pipeline level here.
         self.container_caps = pipeline_def.get('container_caps', [])
+        # Apptainer-only: run the instance under --fakeroot. Rootless
+        # apptainer grants a FUSE-capable user namespace (CAP_SYS_ADMIN
+        # inside the userns) only via --fakeroot; per-exec flags are
+        # ignored on a running instance, so like caps/binds above it must
+        # bake into `apptainer instance start`.
+        self.container_fakeroot = pipeline_def.get('container_fakeroot',
+                                                   False)
         self.container_binds = Pipeline._expand_env_in_config(
             pipeline_def.get('container_binds', []) or [])
 
@@ -1781,6 +1793,8 @@ class Pipeline:
             if self.container_caps:
                 cap_flag = f'--add-caps {",".join(self.container_caps)} '
 
+            fakeroot_flag = '--fakeroot ' if self.container_fakeroot else ''
+
             # Per-pipeline writable layer backed by NFS, not RAM.
             # `--writable-tmpfs` is RAM-only (capped at ~50% of system
             # RAM); workloads that apt-/conda-install at runtime
@@ -1808,7 +1822,7 @@ class Pipeline:
                 no_mount_flag = ''
 
             start_cmd = (
-                f"apptainer instance start {nv_flag}{cap_flag}{bind_flags}"
+                f"apptainer instance start {fakeroot_flag}{nv_flag}{cap_flag}{bind_flags}"
                 f"{tmp_bind_flag}{no_mount_flag}{overlay_flag}{sif_path} {instance_name}"
                 f" && apptainer exec {nv_flag}instance://{instance_name}"
                 f" /usr/sbin/sshd -p {ssh_port}"
