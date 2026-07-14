@@ -233,7 +233,13 @@ class Fio(Application):
     # ------------------------------------------------------------------
 
     def _get_stat(self, stat_dict):
-        stat_dict[f'{self.pkg_id}.runtime'] = self.start_time
+        # start_time is in-memory run state, absent on the freshly-loaded
+        # instance the sweep runner uses for stat collection (and never set by
+        # jarvis core at all — dev builtin.fio has the same latent bug). Guard
+        # it so the AttributeError does not sink the JSON metrics below.
+        start_time = getattr(self, 'start_time', None)
+        if start_time is not None:
+            stat_dict[f'{self.pkg_id}.runtime'] = start_time
         if not self.config.get('output_file'):
             return
         # Called by the sweep runner on a FRESHLY-LOADED package instance,
