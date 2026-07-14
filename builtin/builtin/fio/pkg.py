@@ -25,10 +25,11 @@ class Fio(Application):
             {'name': 'read', 'msg': 'Perform a read workload',
              'type': bool, 'default': False},
             {'name': 'mode', 'msg': 'fio --rw mode; overrides read/write '
-             'when set (adds random and time-based patterns)',
-             'type': str, 'default': None,
-             'choices': ['write', 'read', 'randwrite', 'randread',
-                         'readwrite']},
+             'when set (adds random and time-based patterns); one of '
+             'write/read/randwrite/randread/readwrite. No choices= here: '
+             'jarvis enforces choices against the None default and rejects '
+             'it; _configure validates a set value instead.',
+             'type': str, 'default': None},
             {'name': 'xfer', 'msg': 'Block size for each I/O transfer',
              'type': str, 'default': '1m'},
             {'name': 'total_size', 'msg': 'Total data per job',
