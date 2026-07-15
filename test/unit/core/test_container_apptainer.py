@@ -259,6 +259,22 @@ class TestApptainerConfigRoundTrip(ApptainerStartTestBase):
         self.assertNotIn('container_overlay', saved)
         self.assertNotIn('container_overlay_root', saved)
 
+    def test_tmp_bind_root_roundtrip_config(self):
+        """tmp_bind_root survives save() -> load-from-config, so a
+        pipeline rebuilt from its saved config (ppl start/stop/run)
+        keeps its per-host /tmp bind."""
+        self._create_pipeline('apt_tbr', tmp_bind_root='/mnt/nvme/me')
+
+        p2 = Pipeline('apt_tbr')
+        self.assertEqual(p2.tmp_bind_root, '/mnt/nvme/me')
+
+    def test_container_gpu_roundtrip_config(self):
+        """container_gpu survives save() -> load-from-config."""
+        self._create_pipeline('apt_gpu', container_gpu=True)
+
+        p2 = Pipeline('apt_gpu')
+        self.assertIs(p2.container_gpu, True)
+
     def test_yaml_load_overlay_keys_expandvars(self):
         """YAML load honors both keys and expands env vars in the root
         path, mirroring the tmp_bind_root contract."""

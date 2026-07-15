@@ -332,6 +332,10 @@ class Pipeline:
             pipeline_config['container_overlay'] = False
         if self.container_overlay_root:
             pipeline_config['container_overlay_root'] = self.container_overlay_root
+        if self.container_gpu:
+            pipeline_config['container_gpu'] = self.container_gpu
+        if self.tmp_bind_root:
+            pipeline_config['tmp_bind_root'] = self.tmp_bind_root
 
         # Add base_deploy_mode (default deploy_mode propagated to pkgs).
         if self.base_deploy_mode:
@@ -992,6 +996,12 @@ class Pipeline:
         self.container_overlay_root = (
             os.path.expandvars(overlay_root_raw)
             if overlay_root_raw else None
+        )
+        self.container_gpu = pipeline_config.get('container_gpu', False)
+        tmp_bind_root_raw = pipeline_config.get('tmp_bind_root', None)
+        self.tmp_bind_root = (
+            os.path.expandvars(tmp_bind_root_raw)
+            if tmp_bind_root_raw else None
         )
 
         # Launcher overrides (top-level YAML keys). None = use built-in
