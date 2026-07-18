@@ -10,7 +10,8 @@ import pathlib
 from jarvis_cd.core.pkg import Application
 from jarvis_cd.shell import Exec, LocalExecInfo, PsshExecInfo, MpiExecInfo, Mkdir
 from jarvis_cd.shell.process import Rm
-from jarvis_cd.util.hostfile import Hostfile
+from jarvis_cd.util.container_utils import (
+    container_kwargs, eff_hostfile, single_instance_menu_opt)
 
 
 class Fio(Application):
@@ -71,13 +72,13 @@ class Fio(Application):
             {'name': 'output_file', 'msg': 'fio JSON report filename '
              '(under shared_dir); enables JSON metrics in _get_stat',
              'type': str, 'default': None},
-            {'name': 'single_instance', 'msg': 'Pin fio to the FIRST host '
-             'even when the pipeline hostfile has >1 host. Use for '
-             'single-client baselines (e.g. one client against NFS or a '
-             'head-node-only FUSE mount) so N nodes do not clobber one '
-             'shared JSON report or hit a mount that only exists on the '
-             'head node',
-             'type': bool, 'default': False},
+            single_instance_menu_opt(
+                msg='Pin fio to the FIRST host even when the pipeline '
+                    'hostfile has >1 host. Use for single-client baselines '
+                    '(e.g. one client against NFS or a head-node-only FUSE '
+                    'mount) so N nodes do not clobber one shared JSON '
+                    'report or hit a mount that only exists on the head '
+                    'node'),
             {'name': 'exec_mode', 'msg': 'Multi-node mode: pssh or mpi',
              'type': str, 'default': 'pssh', 'choices': ['pssh', 'mpi']},
         ]
@@ -110,33 +111,16 @@ class Fio(Application):
                                  'readwrite'):
             raise ValueError(f'fio: invalid mode {mode}')
 
-    def _eff_hostfile(self):
-        """The hostfile fio actually fans out over. With single_instance set
-        and a multi-host pipeline hostfile, collapse to just the FIRST host;
-        otherwise the full hostfile (single-node pipelines and genuinely
-        distributed runs are unchanged)."""
-        hf = self.hostfile
-        if self.config.get('single_instance') and hf is not None \
-                and len(hf.hosts) > 1:
-            return Hostfile(hosts=hf.hosts[:1],
-                            hosts_ip=hf.hosts_ip[:1] if hf.hosts_ip else None)
-        return hf
-
     def _exec_info(self):
         exec_mode = self.config.get('exec_mode', 'pssh')
         nprocs = self.config.get('nprocs', 1)
         ppn = self.config.get('ppn', 1)
-        hostfile = self._eff_hostfile()
+        hostfile = eff_hostfile(self)
         use_remote = hostfile is not None and not hostfile.is_local()
 
-        kwargs = dict(env=self.mod_env)
-        if self.config.get('deploy_mode') == 'container':
-            kwargs.update(
-                container=self._container_engine,
-                container_image=self.deploy_image_name(),
-                shared_dir=self.shared_dir,
-                private_dir=self.private_dir,
-            )
+        # Always safe to splat: outside a container deploy the engine is
+        # 'none' and the container wrap is skipped.
+        kwargs = dict(env=self.mod_env, **container_kwargs(self))
 
         if exec_mode == 'mpi' and use_remote:
             return MpiExecInfo(hostfile=hostfile, nprocs=nprocs, ppn=ppn,
