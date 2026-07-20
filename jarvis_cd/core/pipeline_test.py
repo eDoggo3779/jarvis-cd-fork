@@ -8,6 +8,7 @@ import csv
 import yaml
 import copy
 import itertools
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
@@ -44,6 +45,50 @@ def is_pipeline_test(yaml_data: Dict[str, Any]) -> bool:
     return has_config
 
 
+# Wall-clock budget for the teardown that follows a timed-out run. The same
+# hang that tripped the deadline can wedge stop() too, so the cleanup is
+# bounded as well -- otherwise the recovery path reintroduces the hang.
+TEARDOWN_TIMEOUT = 300
+
+
+@contextmanager
+def alarm_timeout(seconds: Optional[int], message: str):
+    """
+    Bound a blocking call with SIGALRM, raising TimeoutError on expiry.
+
+    A wedged package blocks forever inside ``pipeline.start()``. The sweep
+    runner's per-run ``try/except`` only catches exceptions, and a hang is
+    not an exception -- so one bad combination silently consumes the entire
+    grid and, under a scheduler, the entire allocation. Converting the hang
+    into a TimeoutError lets the runner record that combination as failed
+    and move on to the next one.
+
+    Arms only in the main thread, since Python delivers signals there; in a
+    worker thread this is a no-op so threaded/library callers still work.
+
+    :param seconds: Budget in seconds; falsy or <= 0 disables the alarm
+    :param message: Text carried by the raised TimeoutError
+    """
+    import signal
+    import threading
+
+    if not seconds or seconds <= 0 or \
+            threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _on_alarm(signum, frame):
+        raise TimeoutError(message)
+
+    previous = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.alarm(int(seconds))
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
 class PipelineTest:
     """
     Pipeline test runner for experiment sets using grid search.
@@ -63,6 +108,9 @@ class PipelineTest:
         self.loop = []  # Loop structure
         self.repeat = 1
         self.output = None
+        # Wall-clock budget for a single combination, in seconds. None (the
+        # default) preserves the historical unbounded behaviour.
+        self.run_timeout = None
         self.combinations = []  # Generated test combinations
         self.results = []  # Collected results
         # Top-level scheduler block (one job wraps the whole test run).
@@ -245,6 +293,7 @@ class PipelineTest:
         self.loop = test_def.get('loop', [])
         self.repeat = test_def.get('repeat', 1)
         self.output = test_def.get('output', None)
+        self.run_timeout = test_def.get('run_timeout', None)
         self.scheduler = test_def.get('scheduler', None)
         self.source_path = str(pipeline_file.absolute())
 
@@ -261,6 +310,8 @@ class PipelineTest:
         logger.info(f"  Total combinations: {len(self.combinations)}")
         logger.info(f"  Repeat count: {self.repeat}")
         logger.info(f"  Total runs: {len(self.combinations) * self.repeat}")
+        if self.run_timeout:
+            logger.info(f"  Run timeout: {self.run_timeout}s per combination")
 
     def _build_combinations(self):
         """
@@ -606,14 +657,35 @@ class PipelineTest:
             # template + scheduler.X vars), submit it as its own job and
             # block until it finishes via ``sbatch --wait``. Otherwise
             # run the pipeline in-process.
-            if pipeline.scheduler:
-                logger.pipeline(
-                    f"Submitting iteration as scheduler job "
-                    f"({pipeline.scheduler.get('name')})")
-                pipeline.submit(submit=True, wait=True)
-            else:
-                pipeline.start()
-                pipeline.stop()
+            try:
+                with alarm_timeout(
+                        self.run_timeout,
+                        f"run exceeded run_timeout of {self.run_timeout}s"):
+                    if pipeline.scheduler:
+                        logger.pipeline(
+                            f"Submitting iteration as scheduler job "
+                            f"({pipeline.scheduler.get('name')})")
+                        pipeline.submit(submit=True, wait=True)
+                    else:
+                        pipeline.start()
+                        pipeline.stop()
+            except TimeoutError:
+                # Tear down before surfacing the failure, so the next
+                # combination does not inherit this one's live container
+                # instances, FUSE mounts or servers.
+                logger.error(
+                    f"Run exceeded run_timeout of {self.run_timeout}s; "
+                    f"tearing down and continuing to the next combination")
+                try:
+                    with alarm_timeout(
+                            TEARDOWN_TIMEOUT,
+                            f"teardown exceeded {TEARDOWN_TIMEOUT}s"):
+                        pipeline.stop()
+                except Exception as stop_error:
+                    logger.warning(
+                        f"Teardown after timeout did not complete cleanly: "
+                        f"{stop_error}")
+                raise
 
             end_time = time.time()
             result['runtime'] = end_time - start_time
