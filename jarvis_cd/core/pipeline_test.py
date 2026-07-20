@@ -51,8 +51,26 @@ def is_pipeline_test(yaml_data: Dict[str, Any]) -> bool:
 TEARDOWN_TIMEOUT = 300
 
 
+class Deadline:
+    """
+    Records whether an :func:`alarm_timeout` budget actually expired.
+
+    The TimeoutError raised by the alarm does not necessarily reach the
+    caller: ``Pipeline.start`` catches whatever a package raises and
+    re-raises it as ``RuntimeError("Pipeline startup failed at package
+    ...")``. Keying recovery off the exception *type* therefore misses the
+    timeout and skips teardown, which leaks the run's redis, container
+    instances and mounts into the next combination. This flag is set in the
+    signal handler itself, so it survives any downstream re-wrapping.
+    """
+
+    def __init__(self):
+        self.expired = False
+
+
 @contextmanager
-def alarm_timeout(seconds: Optional[int], message: str):
+def alarm_timeout(seconds: Optional[int], message: str,
+                  deadline: Optional['Deadline'] = None):
     """
     Bound a blocking call with SIGALRM, raising TimeoutError on expiry.
 
@@ -68,6 +86,9 @@ def alarm_timeout(seconds: Optional[int], message: str):
 
     :param seconds: Budget in seconds; falsy or <= 0 disables the alarm
     :param message: Text carried by the raised TimeoutError
+    :param deadline: Optional Deadline marked ``expired`` when the alarm
+        fires, so callers can detect the timeout even if the TimeoutError
+        is re-wrapped as another exception type further up the stack
     """
     import signal
     import threading
@@ -78,6 +99,8 @@ def alarm_timeout(seconds: Optional[int], message: str):
         return
 
     def _on_alarm(signum, frame):
+        if deadline is not None:
+            deadline.expired = True
         raise TimeoutError(message)
 
     previous = signal.signal(signal.SIGALRM, _on_alarm)
@@ -657,10 +680,12 @@ class PipelineTest:
             # template + scheduler.X vars), submit it as its own job and
             # block until it finishes via ``sbatch --wait``. Otherwise
             # run the pipeline in-process.
+            deadline = Deadline()
             try:
                 with alarm_timeout(
                         self.run_timeout,
-                        f"run exceeded run_timeout of {self.run_timeout}s"):
+                        f"run exceeded run_timeout of {self.run_timeout}s",
+                        deadline):
                     if pipeline.scheduler:
                         logger.pipeline(
                             f"Submitting iteration as scheduler job "
@@ -669,10 +694,16 @@ class PipelineTest:
                     else:
                         pipeline.start()
                         pipeline.stop()
-            except TimeoutError:
-                # Tear down before surfacing the failure, so the next
-                # combination does not inherit this one's live container
-                # instances, FUSE mounts or servers.
+            except Exception:
+                # Keyed off the Deadline, not the exception type:
+                # Pipeline.start re-raises whatever a package raised as
+                # RuntimeError, so the TimeoutError does not survive to
+                # here. Without teardown the run's redis, container
+                # instances and mounts leak into the next combination --
+                # which then silently benchmarks the previous run's
+                # processes.
+                if not deadline.expired:
+                    raise
                 logger.error(
                     f"Run exceeded run_timeout of {self.run_timeout}s; "
                     f"tearing down and continuing to the next combination")

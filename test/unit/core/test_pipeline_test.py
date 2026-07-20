@@ -14,9 +14,12 @@ from pathlib import Path
 # Add the project root to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
+from unittest.mock import patch
+
 from jarvis_cd.core.pipeline_test import (
     is_pipeline_test,
     alarm_timeout,
+    Deadline,
     PipelineTest,
     load_yaml_auto,
 )
@@ -954,6 +957,99 @@ class TestPipelineTestRunTimeout(unittest.TestCase):
         """Omitting run_timeout leaves the sweep unbounded as before."""
         test = PipelineTest()
         self.assertIsNone(test.run_timeout)
+
+    def test_deadline_records_expiry(self):
+        """The Deadline flag is set from inside the signal handler."""
+        deadline = Deadline()
+        self.assertFalse(deadline.expired)
+        with self.assertRaises(TimeoutError):
+            with alarm_timeout(1, 'budget exceeded', deadline):
+                time.sleep(30)
+        self.assertTrue(deadline.expired)
+
+    def test_deadline_not_marked_when_call_completes(self):
+        """A run that finishes in time leaves the Deadline untouched."""
+        deadline = Deadline()
+        with alarm_timeout(30, 'budget exceeded', deadline):
+            pass
+        self.assertFalse(deadline.expired)
+
+    def test_teardown_runs_when_timeout_is_rewrapped(self):
+        """Teardown must fire even though start() re-wraps TimeoutError.
+
+        Pipeline.start catches whatever a package raises and re-raises it as
+        RuntimeError, so the TimeoutError never reaches the sweep runner.
+        Keying recovery off the exception type silently skipped teardown and
+        leaked redis / container instances into the next combination.
+        """
+        stopped = []
+
+        class HangingPipeline:
+            scheduler = None
+            packages = []
+
+            def load(self, *args, **kwargs):
+                pass
+
+            def configure_all_packages(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                try:
+                    time.sleep(30)
+                except TimeoutError as e:
+                    # Mirrors jarvis_cd/core/pipeline.py:510
+                    raise RuntimeError(
+                        f"Pipeline startup failed at package 'bench': {e}"
+                    ) from e
+
+            def stop(self):
+                stopped.append(True)
+
+        test = PipelineTest()
+        test.name = 'demo'
+        test.combinations = [{'ior.nprocs': 1}]
+        test.run_timeout = 1
+
+        with patch('jarvis_cd.core.pipeline_test.Pipeline', HangingPipeline):
+            with self.assertRaises(RuntimeError):
+                test._run_single({'name': 'demo', 'pkgs': []},
+                                 {'ior.nprocs': 1}, 0)
+
+        self.assertEqual(len(stopped), 1,
+                         'teardown did not run after a re-wrapped timeout')
+
+    def test_no_teardown_for_ordinary_failure(self):
+        """A non-timeout failure is re-raised without the timeout teardown."""
+        stopped = []
+
+        class FailingPipeline:
+            scheduler = None
+            packages = []
+
+            def load(self, *args, **kwargs):
+                pass
+
+            def configure_all_packages(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                raise RuntimeError('package blew up immediately')
+
+            def stop(self):
+                stopped.append(True)
+
+        test = PipelineTest()
+        test.name = 'demo'
+        test.combinations = [{'ior.nprocs': 1}]
+        test.run_timeout = 600
+
+        with patch('jarvis_cd.core.pipeline_test.Pipeline', FailingPipeline):
+            with self.assertRaises(RuntimeError):
+                test._run_single({'name': 'demo', 'pkgs': []},
+                                 {'ior.nprocs': 1}, 0)
+
+        self.assertEqual(stopped, [])
 
     def test_timed_out_run_is_recorded_failed_and_sweep_continues(self):
         """A hung combination fails that row only; later rows still run."""
