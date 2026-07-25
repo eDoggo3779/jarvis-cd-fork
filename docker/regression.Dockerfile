@@ -152,14 +152,22 @@ RUN mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh
 #       OMPI4 (orted) vs OMPI5 (prted) daemon naming.
 #     - First-contact host keys: the in-instance `ssh -p <port>` hop to a
 #       peer instance would fail interactive host-key verification
-#       (instance keys != node keys; no port entries in known_hosts).
+#       (instance keys != node keys; no port entries in known_hosts). We
+#       PREPEND the Host * block to the system-wide /etc/ssh/ssh_config, not
+#       only a drop-in: the base image's ssh_config may lack an
+#       `Include ssh_config.d/*.conf` line, so the drop-in alone was silently
+#       ignored on Ares (ssh is first-match-wins, so top-of-file always wins).
 RUN for b in mpiexec mpirun prted orted orterun ior; do \
         [ -e "/opt/iowarp-view/bin/$b" ] \
             && ln -sf "/opt/iowarp-view/bin/$b" "/usr/local/bin/$b"; \
     done; \
     mkdir -p /etc/ssh/ssh_config.d \
     && printf 'Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    LogLevel ERROR\n' \
-         > /etc/ssh/ssh_config.d/instance.conf
+         > /etc/ssh/ssh_config.d/instance.conf \
+    && touch /etc/ssh/ssh_config \
+    && { printf 'Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    LogLevel ERROR\n\n'; \
+         cat /etc/ssh/ssh_config; } > /etc/ssh/ssh_config.new \
+    && mv /etc/ssh/ssh_config.new /etc/ssh/ssh_config
 
 # 6) GATE — fail the build if a REQUIRED binary is missing. v3 list: ior
 #    replaces fio; clio_cte_bench and clio_redis_bench left the project

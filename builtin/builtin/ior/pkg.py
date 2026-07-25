@@ -272,6 +272,51 @@ class Ior(Application):
             **container_kwargs(self),
         )).run()
 
+        # Fail loudly on a silent MPI/ior failure. A hard mpiexec abort
+        # (e.g. "PRTE has lost communication with a remote daemon" when the
+        # cross-node spawn fails) or an ior that never reached its results
+        # block leaves no summary in the log, yet Exec does not always raise.
+        # Without this gate the pipeline marks the combination success with
+        # blank bandwidths -- a false green that would let a daily regression
+        # report healthy while multi-node is broken.
+        self._assert_ior_completed()
+
+    def _assert_ior_completed(self):
+        """Raise if the just-finished ior run produced no results summary.
+
+        Reads the log (same file _get_stat parses) and requires a Max
+        Write/Read line for each requested operation. A missing summary
+        means ior aborted or never ran the measured I/O -- surface it as a
+        failed combination instead of a success with empty stats.
+        """
+        wrote = self.config.get('write', True)
+        read = self.config.get('read', False)
+        if not wrote and not read:
+            return  # no workload requested; nothing to validate
+
+        log_path = self.config.get('log')
+        text = ''
+        if log_path and os.path.isfile(log_path):
+            try:
+                with open(log_path, 'r') as f:
+                    text = f.read()
+            except OSError:
+                text = ''
+        stats = self.parse_log(text)
+
+        missing = []
+        if wrote and f'{self.pkg_id}.write_max_mibs' not in stats:
+            missing.append('write')
+        if read and f'{self.pkg_id}.read_max_mibs' not in stats:
+            missing.append('read')
+        if missing:
+            raise RuntimeError(
+                f'ior[{self.pkg_id}]: no IOR {"/".join(missing)} summary in '
+                f'{log_path!r} -- the run failed (mpiexec abort or no '
+                f'cross-node spawn) and produced no bandwidth. Failing this '
+                f'combination rather than reporting a false success; inspect '
+                f'the log for the mpiexec/PRTE error.')
+
     def stop(self):
         """Stop IOR (no-op — IOR runs to completion)."""
         pass

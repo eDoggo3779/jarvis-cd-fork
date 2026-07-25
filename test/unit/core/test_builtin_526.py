@@ -9,7 +9,9 @@ These test the pure logic only; the MPI-in-container launch chain itself is
 exercised on Ares by the smoke pipelines.
 """
 import importlib.util
+import os
 import pathlib
+import tempfile
 import unittest
 
 from jarvis_cd.util.hostfile import Hostfile
@@ -84,6 +86,56 @@ class TestIorEffHostfile(unittest.TestCase):
             object.__new__(_ior_mod.Ior))]
         for key in ('num_nodes', 'stonewall', 'single_instance'):
             self.assertIn(key, names)
+
+
+class TestIorCompletionGate(unittest.TestCase):
+    """_assert_ior_completed converts a silent MPI/ior failure (no summary
+    in the log) into a failed combination instead of a false-green success."""
+
+    WRITE_SUMMARY = (
+        'access    bw(MiB/s)\n'
+        'write     112.92     113.96     0.017 65536 1024.0 0.03 1.12 0.0 1.13 0\n'
+        'Max Write: 112.92 MiB/sec (118.40 MB/sec)\n')
+    # A hard multi-node abort: header/options only, no results block.
+    ABORTED = ('PRTE has lost communication with a remote daemon.\n'
+               'Host key verification failed.\n')
+
+    def _pkg(self, config, log_text=None):
+        pkg = object.__new__(_ior_mod.Ior)
+        pkg.pkg_id = 'cte_ior'
+        pkg.config = dict(config)
+        if log_text is not None:
+            fd, path = tempfile.mkstemp(suffix='.log')
+            with os.fdopen(fd, 'w') as f:
+                f.write(log_text)
+            self.addCleanup(os.remove, path)
+            pkg.config['log'] = path
+        return pkg
+
+    def test_passes_when_write_summary_present(self):
+        pkg = self._pkg({'write': True, 'read': False}, self.WRITE_SUMMARY)
+        pkg._assert_ior_completed()  # must not raise
+
+    def test_raises_on_aborted_run(self):
+        pkg = self._pkg({'write': True, 'read': False}, self.ABORTED)
+        with self.assertRaises(RuntimeError):
+            pkg._assert_ior_completed()
+
+    def test_raises_when_log_missing(self):
+        pkg = self._pkg({'write': True, 'read': False})
+        pkg.config['log'] = '/nonexistent/ior.log'
+        with self.assertRaises(RuntimeError):
+            pkg._assert_ior_completed()
+
+    def test_raises_when_read_requested_but_absent(self):
+        # write-only summary but the combo also asked for a read phase.
+        pkg = self._pkg({'write': True, 'read': True}, self.WRITE_SUMMARY)
+        with self.assertRaises(RuntimeError):
+            pkg._assert_ior_completed()
+
+    def test_noop_when_no_workload_requested(self):
+        pkg = self._pkg({'write': False, 'read': False}, self.ABORTED)
+        pkg._assert_ior_completed()  # nothing requested -> nothing to validate
 
 
 class TestRedisBenchmarkParse(unittest.TestCase):
