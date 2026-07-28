@@ -1,4 +1,4 @@
-"""Unit tests for OpenMPI launcher MCA injection (#526 distributed).
+"""Unit tests for OpenMPI launcher MCA injection (distributed pipelines).
 
 OpenMPI 5 (PRRTE) renamed the ssh launch plm and its params: OMPI <=4 uses
 plm/rsh + plm_rsh_agent/plm_rsh_args; OMPI 5 uses plm/ssh + plm_ssh_agent/

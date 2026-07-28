@@ -59,7 +59,7 @@ Clean produced data
 ```bash
 jarvis pipeline clean
 ```
-## v3 options (#526 regression pipelines)
+## Performance evaluation options
 
 - `num_nodes` (default `0` = all hosts) — launch on the first N hosts of the
   pipeline hostfile. Enables node-count sweeps ({1,2,4} nodes) inside one

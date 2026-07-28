@@ -6,7 +6,7 @@ LabStor is a distributed semi-microkernel for building data processing services.
 spack install redis
 ```
 
-## v3 options (#526 regression pipelines)
+## Performance evaluation options
 
 - `clients` (default `50` = tool default) — parallel client connections
   (`-c`). For a "threads" sweep, zip with `nthreads` so a row means N

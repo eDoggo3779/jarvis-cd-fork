@@ -1,47 +1,34 @@
 #!/bin/bash
-# Build the #526 regression APPTAINER SIF — this IS the automated
-# "installation" for the containerized single_node/distributed pipelines
-# (which live in clio-core under jarvis_clio_core/pipelines/ares/).
-# Two stages, docker-only:
-#   1. `docker build` docker/regression.Dockerfile -> a local OCI image (it
-#      bakes spack iowarp(+fuse) and ior@3.3.0, juicefs, redis, THIS
-#      jarvis-cd checkout, and clio-core at a pinned ref; its final RUN
-#      fails if any required binary is missing — the install-cleanliness
-#      gate).
-#   2. `apptainer build <sif> docker-daemon://<image>` -> a portable .sif.
-#      No Docker Hub round-trip, no apptainer --fakeroot needed at build time.
+# Build the performance evaluation SIF — the automated installation step for
+# the containerized single_node/distributed pipelines, which live in clio-core
+# under jarvis_clio_core/pipelines/ares/.
 #
-# Source trees:
-#   - jarvis-cd enters via the docker build CONTEXT (this repo's root): the
-#     image always matches the checkout you run this script from.
-#   - clio-core enters via a git fetch inside the Dockerfile at
-#     CLIO_REPO_URL @ CLIO_REF. When CLIO_REF is a branch, this script
-#     resolves it to a commit SHA first (git ls-remote) so docker's layer
-#     cache busts exactly when clio-core pushes — a raw branch-name build
-#     arg would silently reuse a stale cached clone. The resolved SHA is
-#     echoed: record it, it is the exact clio-core commit baked in.
+# Two stages:
+#   1. docker build docker/perf_eval.Dockerfile -> a local OCI image baking
+#      spack iowarp(+fuse) + ior, juicefs, redis, this jarvis-cd checkout, and
+#      clio-core at CLIO_REF. Its final RUN fails if a required binary is
+#      missing.
+#   2. apptainer build <sif> docker-daemon://<image> -> a portable .sif. No
+#      registry round-trip and no apptainer --fakeroot at build time.
 #
-# The SIF is written to the jarvis containers cache so the pipeline YAMLs
-# find it by basename (container_image: "iowarp-regression-526-v3"):
-#     <jarvis shared_dir>/containers/iowarp-regression-526-v3.sif
-# On Ares shared_dir is on /mnt/common (shared FS) -> the SIF is visible on
-# every compute node automatically (no per-node copy).
+# A CLIO_REF branch name is resolved to a commit SHA first (git ls-remote) so
+# docker's layer cache busts exactly when clio-core pushes; a raw branch name
+# would silently reuse a stale cached clone. The resolved SHA is echoed —
+# record it, it is the exact clio-core commit baked into the image.
 #
-# Re-run daily so #526 tracks the latest IOWarp.
+# The SIF lands in the jarvis containers cache so the pipeline YAMLs find it by
+# basename (container_image: "iowarp-perf-eval"):
+#     <jarvis shared_dir>/containers/iowarp-perf-eval.sif
+# On a shared filesystem that makes it visible on every compute node with no
+# per-node copy.
 #
-# Usage (from anywhere, on a host with docker + apptainer):
-#   bash docker/build_regression_image.sh
+# Usage:
+#   bash docker/build_perf_eval_image.sh          # re-run daily
+#   Env overrides: IMAGE, SIF_BASENAME (must match the YAMLs' container_image),
+#   SIF_PATH, IOWARP_SPEC, IOR_SPEC, BASE_IMAGE, CLIO_REPO_URL, CLIO_REF,
+#   SKIP_DOCKER_BUILD=1 (reuse an existing local docker image).
 #
-# Common overrides (env):
-#   IMAGE=iowarp-regression:526-v3          # local docker image tag to build
-#   SIF_BASENAME=iowarp-regression-526-v3   # must match YAML container_image
-#   SIF_PATH=/abs/path/iowarp-regression-526-v3.sif  # override the SIF location
-#   IOWARP_SPEC='iowarp@dev +fuse'          # upstream dev + FUSE (v3: no +redis)
-#   IOR_SPEC='ior@3.3.0'                    # pinned; builtin.ior parses 3.3.0 output
-#   BASE_IMAGE=iowarp/iowarp-build:latest
-#   CLIO_REPO_URL=https://github.com/eDoggo3779/clio-core-fork.git
-#   CLIO_REF=jarvis-pipelines-526           # branch (resolved to SHA) or SHA
-#   SKIP_DOCKER_BUILD=1                     # reuse an existing local docker image
+# Output: <SIF_PATH>, printed and listed on success.
 set -euo pipefail
 
 IMAGE="${IMAGE:-iowarp-perf-eval:latest}"

@@ -1,6 +1,6 @@
 """Unit tests for SBATCH directive rendering in jarvis_cd.core.scheduler.
 
-Regression guard for the #526 smoke failure: slurm does NOT expand env vars
+Regression guard: slurm does NOT expand env vars
 in #SBATCH directives, so an unexpanded ``${HOME}`` in output:/error: was
 taken literally (relative to WorkDir), the log file could not be opened, and
 the job failed at launch with no logs. jarvis must expand ${VAR} host-side

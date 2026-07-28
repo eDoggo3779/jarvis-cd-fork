@@ -1,60 +1,47 @@
 # =============================================================================
-# regression.Dockerfile — prebuilt image for the #526 CONTAINER pipelines
-# (clio-core's single_node.yaml / distributed.yaml with
-#  base_deploy_mode: container).
+# perf_eval.Dockerfile — image for the performance evaluation pipelines
+# (clio-core's single_node.yaml / distributed.yaml, base_deploy_mode:
+#  container).
 # =============================================================================
 #
-# The #526 pipelines deploy with APPTAINER, but this Dockerfile is the ONLY
-# build path: docker/build_regression_image.sh does the docker build here and
-# then converts the result to a portable .sif with
-#   apptainer build <sif> docker-daemon://iowarp-regression:526-v3
-# (jarvis then starts ONE apptainer instance per node and runs the WHOLE
-# pipeline inside it via apptainer exec instance://...). Every package —
-# redis, juicefs, ior, clio_* — runs bare-metal inside the container, so a
-# FUSE mount made by juicefs/CTE is visible to ior in the same mount
-# namespace. Multi-node MPI runs launch mpiexec INSIDE the head instance
-# and spawn remote ranks over the instance sshd (container_ssh_port).
+# Starting from the IOWarp build base, installs iowarp@dev +fuse and ior@3.3.0
+# through spack in ONE invocation, so ior links against the same MPI whose
+# mpiexec the view puts on PATH — an apt-linked ior would be launched by a
+# different MPI. Also installs juicefs, redis, openmpi, sshd, this jarvis-cd
+# checkout, and clio-core at CLIO_REF. clio-core's spack recipe is registered
+# first so `iowarp` resolves to it rather than the base image's builtin. The
+# final RUN fails the build if any required binary is missing, so a broken
+# install cannot reach the cluster. No +hdf5: the sweeps use posix.
 #
-# THE BUILD IS THE "installs run cleanly" GATE: the final RUN fails the build
-# if any required binary is missing (this is how #526 "includes the
-# installation").
+# Two source trees: jarvis-cd arrives via the docker build CONTEXT, so the
+# image always matches the checkout you build from; clio-core is fetched at
+# CLIO_REPO_URL @ CLIO_REF. The jarvis-cd COPY is kept late so a jarvis-only
+# edit does not rebuild the expensive spack layer.
 #
-# The image combines TWO source trees:
-#   - jarvis-cd: COPY'd from the docker build CONTEXT (this repo's root), so
-#     the image always matches the local checkout under validation — no ref
-#     pin to bump. Build from the repo root (build_regression_image.sh does).
-#   - clio-core: fetched at build time from CLIO_REPO_URL @ CLIO_REF. The
-#     fetch-by-ref form below accepts a branch name OR a commit SHA;
-#     build_regression_image.sh resolves branches to SHAs first so docker's
-#     layer cache busts exactly when clio-core pushes new commits (a raw
-#     branch-name ARG would silently reuse a stale cached clone).
-#     It supplies (a) the EXTENDED spack recipe — installers/spack adds a
-#     `redis` variant the upstream recipe lacks — and (b) the
-#     jarvis_clio_core package repo (clio_* pkg_types).
+# The pipelines deploy under apptainer, but docker is the only build path: an
+# apptainer definition file has no layer cache (every edit would rebuild spack
+# from source) and building one needs root or --fakeroot, whereas converting a
+# finished docker image needs neither. The base image is OCI anyway.
 #
-# Tailored to the IOWarp build base: it runs as the non-root user `iowarp`,
-# ships spack at /home/iowarp/spack, and has NO clio_* built — so system
-# installs run as root, the IOWarp build runs as `iowarp` (it owns spack),
-# and the runtime user is root (the jarvis compose entrypoint uses /root).
+# Runs as the non-root user `iowarp` for the spack build (it owns
+# /home/iowarp/spack) and as root for system installs and at runtime (the
+# jarvis compose entrypoint uses /root).
 #
-# WHY register clio-core's recipe: clio-core owns the iowarp recipe used by
-# this image (namespace `iowarp` overrides the builtin), so recipe changes
-# ship with the clio branch instead of waiting on a spack upstream. v3
-# builds `iowarp@dev +fuse` — the v2-only `+redis` variant (it gated
-# clio_redis_bench, which v3 does not ship) is gone from the v3 recipe, so
-# a `+redis` spec would fail to concretize. `ior@3.3.0` is installed in the
-# same spack invocation so it links against the same MPI stack whose
-# `mpiexec` the view puts on PATH (an apt-linked ior would be launched by a
-# different MPI — classic version-mismatch breakage). No `+hdf5`: the
-# regression sweeps use posix/mpiio.
+# Usage:
+#   bash docker/build_perf_eval_image.sh
+#   Do not `docker build` this by hand — the script resolves CLIO_REF to a SHA
+#   (docker's cache key) and converts the result into the .sif the pipeline
+#   YAMLs look for.
+#
+# Output: local docker image iowarp-perf-eval:latest, converted by that script
+#   to <jarvis shared_dir>/containers/iowarp-perf-eval.sif.
 
 ARG BASE_IMAGE=iowarp/iowarp-build:latest
 FROM ${BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
-# IOWarp spec — built with clio-core's recipe (see header). `@dev` is
-# upstream dev; +fuse builds clio_cte_fuse. (v3: no +redis — the variant
-# left the recipe along with clio_redis_bench.)
+# IOWarp spec — built with clio-core's recipe (see header). `@dev` is upstream
+# dev; +fuse builds clio_cte_fuse.
 ARG IOWARP_SPEC=iowarp@dev +fuse
 # IOR pinned: builtin.ior's log parser was written against 3.3.0 output.
 ARG IOR_SPEC=ior@3.3.0
@@ -169,9 +156,7 @@ RUN for b in mpiexec mpirun prted orted orterun ior; do \
          cat /etc/ssh/ssh_config; } > /etc/ssh/ssh_config.new \
     && mv /etc/ssh/ssh_config.new /etc/ssh/ssh_config
 
-# 6) GATE — fail the build if a REQUIRED binary is missing. v3 list: ior
-#    replaces fio; clio_cte_bench and clio_redis_bench left the project
-#    (the redis experiment now uses builtin.redis-benchmark).
+# 6) GATE — fail the build if a required binary is missing.
 RUN for b in clio_run clio_cte_fuse \
              juicefs ior redis-server redis-cli redis-benchmark mpiexec jarvis; do \
         command -v "$b" >/dev/null || { echo "MISSING REQUIRED BINARY: $b"; exit 1; }; \

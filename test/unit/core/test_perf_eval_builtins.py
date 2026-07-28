@@ -1,4 +1,4 @@
-"""Unit tests for the #526 v3 builtin-package logic:
+"""Unit tests for the performance evaluation builtin-package logic:
 
 - ior's effective-hostfile resolution (num_nodes subset, single_instance
   collapse, container-mode path stripping)
@@ -6,7 +6,7 @@
 - juicefs's meta_use_head URL rewrite
 
 These test the pure logic only; the MPI-in-container launch chain itself is
-exercised on Ares by the smoke pipelines.
+exercised on a real cluster by the pipelines themselves.
 """
 import importlib.util
 import os
