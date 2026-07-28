@@ -44,20 +44,20 @@
 #   SKIP_DOCKER_BUILD=1                     # reuse an existing local docker image
 set -euo pipefail
 
-IMAGE="${IMAGE:-iowarp-regression:526-v3}"
-SIF_BASENAME="${SIF_BASENAME:-iowarp-regression-526-v3}"
+IMAGE="${IMAGE:-iowarp-perf-eval:latest}"
+SIF_BASENAME="${SIF_BASENAME:-iowarp-perf-eval}"
 IOWARP_SPEC="${IOWARP_SPEC:-iowarp@dev +fuse}"
 IOR_SPEC="${IOR_SPEC:-ior@3.3.0}"
 BASE_IMAGE="${BASE_IMAGE:-iowarp/iowarp-build:latest}"
-CLIO_REPO_URL="${CLIO_REPO_URL:-https://github.com/eDoggo3779/clio-core-fork.git}"
-CLIO_REF="${CLIO_REF:-jarvis-pipelines-526}"
+CLIO_REPO_URL="${CLIO_REPO_URL:-https://github.com/iowarp/clio-core.git}"
+CLIO_REF="${CLIO_REF:-dev}"
 SKIP_DOCKER_BUILD="${SKIP_DOCKER_BUILD:-0}"
 
 # Build context = the jarvis-cd repo root (parent of docker/), so the
 # Dockerfile's `COPY . /opt/jarvis-cd` bakes in this checkout.
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." && pwd )"
-DOCKERFILE="${SCRIPT_DIR}/regression.Dockerfile"
+DOCKERFILE="${SCRIPT_DIR}/perf_eval.Dockerfile"
 
 # ---- resolve the SIF destination (jarvis containers cache) ----------------
 # Derive shared_dir from the jarvis config so the SIF lands where the YAMLs
@@ -92,7 +92,7 @@ else
   echo "         clone layer for a previously-seen value."                  >&2
 fi
 
-echo "=== #526 regression SIF build ==="
+echo "=== performance evaluation SIF build ==="
 echo "  docker image : $IMAGE"
 echo "  IOWARP_SPEC  : $IOWARP_SPEC"
 echo "  IOR_SPEC     : $IOR_SPEC"

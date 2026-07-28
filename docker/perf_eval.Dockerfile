@@ -60,8 +60,8 @@ ARG IOWARP_SPEC=iowarp@dev +fuse
 ARG IOR_SPEC=ior@3.3.0
 ARG JUICEFS_VERSION=1.2.3
 # clio-core source: URL + ref (branch or SHA; SHA preferred — see header).
-ARG CLIO_REPO_URL=https://github.com/eDoggo3779/clio-core-fork.git
-ARG CLIO_REF=jarvis-pipelines-526
+ARG CLIO_REPO_URL=https://github.com/iowarp/clio-core.git
+ARG CLIO_REF=dev
 ARG SPACK_SETUP=/home/iowarp/spack/share/spack/setup-env.sh
 ARG SPACK_USER=iowarp
 
@@ -176,4 +176,4 @@ RUN for b in clio_run clio_cte_fuse \
              juicefs ior redis-server redis-cli redis-benchmark mpiexec jarvis; do \
         command -v "$b" >/dev/null || { echo "MISSING REQUIRED BINARY: $b"; exit 1; }; \
     done \
-    && echo "iowarp-regression image: required binaries present"
+    && echo "iowarp-perf-eval image: required binaries present"
