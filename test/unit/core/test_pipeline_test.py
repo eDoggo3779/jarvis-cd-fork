@@ -444,8 +444,8 @@ class TestPipelineTestVariableApplication(unittest.TestCase):
 
     def test_apply_top_level_scheduler_not_stamped_without_vars(self):
         """A top-level scheduler describes the ONE job wrapping the whole
-        test (Mode A); without scheduler.X vars it must NOT be stamped onto
-        each iteration config, or every combo would submit a nested sbatch."""
+        test; without scheduler.X vars it must NOT be stamped onto each
+        iteration config, or every combo would submit a nested sbatch."""
         test = PipelineTest()
         test.scheduler = {'name': 'slurm', 'nodes': 2}
         base_config = {
