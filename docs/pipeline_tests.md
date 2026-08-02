@@ -566,7 +566,21 @@ This includes:
 
 ## Custom Statistics
 
-Packages can define custom statistics by implementing the `_get_stat()` method:
+Packages can define custom statistics by implementing the `_get_stat()` method.
+
+**`_get_stat` runs on a fresh package instance**, built by
+`Pipeline._load_package_instance` after the run finished — *not* the object that
+executed `start()`. Anything you stashed in memory during the run is gone, so
+read your metrics back off disk (a log under `self.shared_dir`) rather than out
+of `self.exec.stdout`. The two exceptions are `self.runtime` (seconds `start()`
+took) and `self.start_time` (epoch when it began), which the framework measures
+in `Pipeline.start()` and replays onto the new instance.
+
+`PipelineTest` calls `_get_stat` inside a `try/except` that logs a warning and
+continues, so raising on the first line silently drops **every** stat that
+package would have contributed. The symptom is a blank CSV column, not an error
+— check the run log for `Could not get stats from <pkg_id>` when a column you
+expected comes back empty.
 
 ```python
 class MyBenchmark(Application):
@@ -577,16 +591,20 @@ class MyBenchmark(Application):
         :param stat_dict: A dictionary to populate with statistics.
         :return: None
         """
-        # Parse output for results
-        output = self.exec.stdout.get('localhost', '')
+        # Framework-supplied; safe on a fresh instance.
+        stat_dict[f'{self.pkg_id}.runtime'] = self.runtime
+
+        # Everything else comes off disk.
+        log_path = self.config.get('log')
+        if not log_path or not os.path.isfile(log_path):
+            return
+        with open(log_path, 'r') as f:
+            output = f.read()
 
         # Extract throughput
         if 'throughput' in output:
             throughput = self._parse_throughput(output)
             stat_dict[f'{self.pkg_id}.throughput'] = throughput
-
-        # Record runtime
-        stat_dict[f'{self.pkg_id}.runtime'] = self.runtime
 ```
 
 ### YCSB Example
@@ -610,7 +628,7 @@ class Ycsb(Application):
                 stat_dict[f'{self.pkg_id}.throughput'] = throughput
 
         # Record runtime
-        stat_dict[f'{self.pkg_id}.runtime'] = self.start_time
+        stat_dict[f'{self.pkg_id}.runtime'] = self.runtime
 ```
 
 ### Best Practices for Statistics

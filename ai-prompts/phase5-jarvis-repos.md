@@ -703,7 +703,7 @@ class Ior(Application):
         :param stat_dict: A dictionary of statistics.
         :return: None
         """
-        stat_dict[f'{self.pkg_id}.runtime'] = self.start_time
+        stat_dict[f'{self.pkg_id}.runtime'] = self.runtime
 ```
 
 

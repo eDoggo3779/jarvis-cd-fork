@@ -96,9 +96,14 @@ Implement as needed. `Application.stop` is usually a no-op; `Service.stop` grace
 ### `_get_stat(self, stat_dict)` (optional)
 Populate pipeline-test stats. Always prefix keys with `self.pkg_id`:
 ```python
-stat_dict[f'{self.pkg_id}.bandwidth_mb_s'] = 1234.5
-stat_dict[f'{self.pkg_id}.runtime'] = self.start_time
+stat_dict[f'{self.pkg_id}.runtime'] = self.runtime   # framework-supplied
+stat_dict[f'{self.pkg_id}.bandwidth_mb_s'] = 1234.5  # parsed off disk
 ```
+Runs on a **fresh instance** — in-memory run state (`self.exec`, anything set in
+`start()`) is gone; parse a log file instead. `self.runtime`/`self.start_time`
+are replayed onto the new instance by the framework, so don't assign them in
+`_init`. Raising here is swallowed with a warning and drops *all* of this
+package's stats, surfacing as blank CSV columns rather than an error.
 
 ## 4. Environment — `self.env` vs `self.mod_env`
 
