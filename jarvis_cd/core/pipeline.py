@@ -1927,7 +1927,12 @@ class Pipeline:
                 logger.info(
                     f"Hostfile has {len(hostfile)} hosts; starting "
                     "apptainer instance on every host via PsshExecInfo")
-                exec_info = PsshExecInfo(hostfile=hostfile)
+                exec_info = PsshExecInfo(
+                    hostfile=hostfile,
+                    # ssh propagates no env; inline PATH so the remote resolves
+                    # apptainer via the spack view. PATH only -- never
+                    # LD_LIBRARY_PATH (keep managed libs off apptainer's starter).
+                    env={'PATH': os.environ.get('PATH', '')})
 
             # A per-host overlay upper dir must exist on every node
             # before `apptainer instance start` tries to mount it,
@@ -1985,7 +1990,12 @@ class Pipeline:
             else:
                 logger.info("Deploying containers to all nodes in hostfile")
                 self._distribute_image_to_hosts(hostfile)
-                exec_info = PsshExecInfo(hostfile=hostfile)
+                exec_info = PsshExecInfo(
+                    hostfile=hostfile,
+                    # ssh propagates no env; inline PATH so the remote resolves
+                    # apptainer via the spack view. PATH only -- never
+                    # LD_LIBRARY_PATH (keep managed libs off apptainer's starter).
+                    env={'PATH': os.environ.get('PATH', '')})
 
             Exec(up_cmd, exec_info).run()
             logger.success("Containers started (SSH ready)")
@@ -2111,7 +2121,12 @@ class Pipeline:
         if self._hostfile_is_local_only(hostfile):
             exec_info = LocalExecInfo()
         else:
-            exec_info = PsshExecInfo(hostfile=hostfile)
+            exec_info = PsshExecInfo(
+                hostfile=hostfile,
+                # ssh propagates no env; inline PATH so the remote resolves
+                # apptainer via the spack view. PATH only -- never
+                # LD_LIBRARY_PATH (keep managed libs off apptainer's starter).
+                env={'PATH': os.environ.get('PATH', '')})
 
         Exec(stop_cmd, exec_info).run()
         logger.success("Containers stopped")
@@ -2153,7 +2168,12 @@ class Pipeline:
         if self._hostfile_is_local_only(hostfile):
             exec_info = LocalExecInfo()
         else:
-            exec_info = PsshExecInfo(hostfile=hostfile)
+            exec_info = PsshExecInfo(
+                hostfile=hostfile,
+                # ssh propagates no env; inline PATH so the remote resolves
+                # apptainer via the spack view. PATH only -- never
+                # LD_LIBRARY_PATH (keep managed libs off apptainer's starter).
+                env={'PATH': os.environ.get('PATH', '')})
 
         Exec(kill_cmd, exec_info).run()
         logger.success("Containers force-killed")
