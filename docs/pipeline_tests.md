@@ -572,9 +572,10 @@ Packages can define custom statistics by implementing the `_get_stat()` method.
 `Pipeline._load_package_instance` after the run finished — *not* the object that
 executed `start()`. Anything you stashed in memory during the run is gone, so
 read your metrics back off disk (a log under `self.shared_dir`) rather than out
-of `self.exec.stdout`. The two exceptions are `self.runtime` (seconds `start()`
-took) and `self.start_time` (epoch when it began), which the framework measures
-in `Pipeline.start()` and replays onto the new instance.
+of `self.exec.stdout`. The one exception is `self.runtime` — seconds `start()`
+took, measured in `Pipeline.start()` and replayed onto the new instance.
+(`self.start_time` is deprecated and always `None`; a package reporting a
+runtime must read `self.runtime`.)
 
 `PipelineTest` calls `_get_stat` inside a `try/except` that logs a warning and
 continues, so raising on the first line silently drops **every** stat that

@@ -104,18 +104,27 @@ class TimedStartTest(unittest.TestCase):
 
         self.assertTrue(pkg.started)
         self.assertIn('cte_ior', pipeline.pkg_runtimes)
-        timing = pipeline.pkg_runtimes['cte_ior']
-        self.assertGreaterEqual(timing['runtime'], 0.05)
-        self.assertGreater(timing['start_time'], 0)
+        self.assertGreaterEqual(pipeline.pkg_runtimes['cte_ior'], 0.05)
 
-    def test_sets_timing_on_the_running_instance(self):
+    def test_sets_runtime_on_the_running_instance(self):
         pipeline = self._pipeline()
         pkg = _StubPkg()
 
         pipeline._timed_start({'pkg_id': 'redis_bench'}, pkg)
 
         self.assertIsNotNone(pkg.runtime)
-        self.assertIsNotNone(pkg.start_time)
+
+    def test_never_populates_deprecated_start_time(self):
+        # A package still reading self.start_time must get an empty cell, not
+        # a wall-clock epoch filed under a column that means "seconds". This
+        # is what keeps a half-deployed install -- updated framework, stale
+        # builtin copy -- visibly blank rather than silently wrong.
+        pipeline = self._pipeline()
+        pkg = _StubPkg(duration=0.02)
+
+        pipeline._timed_start({'pkg_id': 'cte_ior'}, pkg)
+
+        self.assertIsNone(pkg.start_time)
 
     def test_records_runtime_even_when_start_raises(self):
         # A failed row still wants to show how long it burned before dying.
@@ -126,16 +135,15 @@ class TimedStartTest(unittest.TestCase):
             pipeline._timed_start({'pkg_id': 'nfs_ior'}, pkg)
 
         self.assertIn('nfs_ior', pipeline.pkg_runtimes)
-        self.assertGreaterEqual(
-            pipeline.pkg_runtimes['nfs_ior']['runtime'], 0.02)
+        self.assertGreaterEqual(pipeline.pkg_runtimes['nfs_ior'], 0.02)
 
     def test_each_package_timed_separately(self):
         pipeline = self._pipeline()
         pipeline._timed_start({'pkg_id': 'fast'}, _StubPkg())
         pipeline._timed_start({'pkg_id': 'slow'}, _StubPkg(duration=0.05))
 
-        self.assertLess(pipeline.pkg_runtimes['fast']['runtime'],
-                        pipeline.pkg_runtimes['slow']['runtime'])
+        self.assertLess(pipeline.pkg_runtimes['fast'],
+                        pipeline.pkg_runtimes['slow'])
 
 
 class GetStatRuntimeTest(unittest.TestCase):

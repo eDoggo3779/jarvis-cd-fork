@@ -531,21 +531,19 @@ class Pipeline:
         Timed in ``finally`` on purpose: a package that raised still ran for
         some time, and that is exactly the number a failed CSV row wants.
 
+        Records ``runtime`` only -- see ``Pkg.__init__`` for why
+        ``start_time`` must stay unpopulated.
+
         :param pkg_def: Package definition dictionary
         :param pkg_instance: The instance whose start() to run
         """
-        start_time = time.time()
         counter = time.perf_counter()
         try:
             pkg_instance.start()
         finally:
             runtime = time.perf_counter() - counter
-            pkg_instance.start_time = start_time
             pkg_instance.runtime = runtime
-            self.pkg_runtimes[pkg_def['pkg_id']] = {
-                'start_time': start_time,
-                'runtime': runtime,
-            }
+            self.pkg_runtimes[pkg_def['pkg_id']] = runtime
 
     def stop(self):
         """Stop all packages in the pipeline"""
@@ -1405,16 +1403,15 @@ class Pipeline:
         # Initialize directories now that pkg_id is set
         pkg_instance._ensure_directories()
 
-        # Replay this package's start() timing onto the fresh instance. Each
+        # Replay this package's start() runtime onto the fresh instance. Each
         # phase (start/stop/_get_stat) gets its own object, so without this the
         # stats instance has no idea the package ever ran and `<pkg_id>.runtime`
         # lands in the CSV blank. MUST come after _ensure_directories(), which
         # is what calls the package's own _init() -- an _init that assigns
-        # self.runtime/self.start_time would otherwise clobber the replay.
-        timing = self.pkg_runtimes.get(pkg_def['pkg_id'])
-        if timing:
-            pkg_instance.start_time = timing['start_time']
-            pkg_instance.runtime = timing['runtime']
+        # self.runtime would otherwise clobber the replay.
+        runtime = self.pkg_runtimes.get(pkg_def['pkg_id'])
+        if runtime is not None:
+            pkg_instance.runtime = runtime
 
         # Set configuration
         base_config = pkg_def.get('config', {})
