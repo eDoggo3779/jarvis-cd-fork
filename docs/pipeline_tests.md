@@ -401,7 +401,7 @@ test inherits them:
 ```yaml
 config:
   name: ior_sweep
-  ssh_cmd:  "env -u LD_LIBRARY_PATH ssh"   # host openssh, not conda's
+  ssh_cmd:  "env -u LD_LIBRARY_PATH ssh"   # host openssh, not a managed env's
   pssh_cmd: "env -u LD_LIBRARY_PATH ssh"
   mpi_cmd:  "mpiexec"
   pkgs:
@@ -418,7 +418,7 @@ output: "${HOME}/ior_results"
 
 These swap the SSH / parallel-SSH / MPI launchers without modifying
 any package. The canonical use is `env -u LD_LIBRARY_PATH ssh`, which
-keeps a conda environment's `libcrypto` out of the host `ssh` (an ABI
+keeps a managed environment's `libcrypto` out of the host `ssh` (an ABI
 mismatch otherwise makes `ssh` exit 255 before forwarding the remote
 command). See [shell.md → Launcher Overrides](shell.md#launcher-overrides)
 for the full mechanism and the per-MPI-backend bootstrap forwarding.
