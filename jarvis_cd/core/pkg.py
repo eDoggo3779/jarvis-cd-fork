@@ -112,6 +112,15 @@ class Pkg:
         self.global_id = None
         self.pkg_id = None
 
+        # Run timing, restored by Pipeline._load_package_instance from what
+        # Pipeline.start() measured. Both stay None outside a pipeline run
+        # (standalone packages, or a package that never started).
+        # They MUST be defined here: _get_stat runs on a *fresh* instance --
+        # not the one that ran -- so a package reading self.runtime would
+        # otherwise raise AttributeError and lose every stat it collects.
+        self.start_time = None   # epoch seconds when start() was entered
+        self.runtime = None      # seconds start() took
+
         # Note: Directories will be initialized by Pipeline._load_package_instance
         # after pkg_id is set, or by user code for standalone packages
 

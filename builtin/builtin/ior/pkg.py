@@ -388,7 +388,7 @@ class Ior(Application):
         by ``_configure``) and adds Max/Min/Mean/StdDev MiB/sec entries
         per operation. Missing or unparseable log → only runtime is set.
         """
-        stat_dict[f'{self.pkg_id}.runtime'] = getattr(self, 'start_time', None)
+        stat_dict[f'{self.pkg_id}.runtime'] = self.runtime
 
         log_path = self.config.get('log')
         if not log_path or not os.path.isfile(log_path):

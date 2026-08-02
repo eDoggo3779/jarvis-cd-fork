@@ -5,6 +5,7 @@ Provides the consolidated Pipeline class that combines pipeline creation, loadin
 
 import os
 import socket
+import time
 import yaml
 import copy
 from pathlib import Path
@@ -33,6 +34,13 @@ class Pipeline:
         self.env = {}
         self.created_at = None
         self.last_loaded_file = None
+
+        # Per-package start() timings, keyed by pkg_id ->
+        # {'start_time': epoch, 'runtime': seconds}. Recorded by start() and
+        # replayed onto every later instance by _load_package_instance, since
+        # each phase (start/stop/_get_stat) gets a *fresh* package object and
+        # in-memory state does not survive between them.
+        self.pkg_runtimes = {}
 
         # Container parameters
         self.container_image = ""  # Pre-built image to use
@@ -495,7 +503,7 @@ class Pipeline:
                     self._apply_interceptors_to_package(pkg_instance, pkg_def)
 
                     if hasattr(pkg_instance, 'start'):
-                        pkg_instance.start()
+                        self._timed_start(pkg_def, pkg_instance)
                     else:
                         logger.warning(f"Package {pkg_def['pkg_id']} has no start method")
 
@@ -509,6 +517,36 @@ class Pipeline:
                     logger.error(f"Error starting package {pkg_def['pkg_id']}: {e}")
                     raise RuntimeError(f"Pipeline startup failed at package '{pkg_def['pkg_id']}': {e}") from e
     
+    def _timed_start(self, pkg_def, pkg_instance):
+        """
+        Run a package's ``start()`` and record how long it took.
+
+        Benchmark packages report ``<pkg_id>.runtime`` out of ``self.runtime``,
+        but ``_get_stat`` runs on a *fresh* instance built long after
+        ``start()`` returned (see ``_load_package_instance``), so the
+        measurement cannot live on the instance that made it. Park it on the
+        pipeline; ``_load_package_instance`` replays it onto every later
+        instance of the same ``pkg_id``.
+
+        Timed in ``finally`` on purpose: a package that raised still ran for
+        some time, and that is exactly the number a failed CSV row wants.
+
+        :param pkg_def: Package definition dictionary
+        :param pkg_instance: The instance whose start() to run
+        """
+        start_time = time.time()
+        counter = time.perf_counter()
+        try:
+            pkg_instance.start()
+        finally:
+            runtime = time.perf_counter() - counter
+            pkg_instance.start_time = start_time
+            pkg_instance.runtime = runtime
+            self.pkg_runtimes[pkg_def['pkg_id']] = {
+                'start_time': start_time,
+                'runtime': runtime,
+            }
+
     def stop(self):
         """Stop all packages in the pipeline"""
         from jarvis_cd.util.logger import logger
@@ -1367,6 +1405,17 @@ class Pipeline:
         # Initialize directories now that pkg_id is set
         pkg_instance._ensure_directories()
 
+        # Replay this package's start() timing onto the fresh instance. Each
+        # phase (start/stop/_get_stat) gets its own object, so without this the
+        # stats instance has no idea the package ever ran and `<pkg_id>.runtime`
+        # lands in the CSV blank. MUST come after _ensure_directories(), which
+        # is what calls the package's own _init() -- an _init that assigns
+        # self.runtime/self.start_time would otherwise clobber the replay.
+        timing = self.pkg_runtimes.get(pkg_def['pkg_id'])
+        if timing:
+            pkg_instance.start_time = timing['start_time']
+            pkg_instance.runtime = timing['runtime']
+
         # Set configuration
         base_config = pkg_def.get('config', {})
         base_config.setdefault('do_dbg', False)
@@ -2010,7 +2059,7 @@ class Pipeline:
                 self._apply_interceptors_to_package(pkg_instance, pkg_def)
 
                 if hasattr(pkg_instance, 'start'):
-                    pkg_instance.start()
+                    self._timed_start(pkg_def, pkg_instance)
                 else:
                     logger.warning(f"Package {pkg_def['pkg_id']} has no start method")
 

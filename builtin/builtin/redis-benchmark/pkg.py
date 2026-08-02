@@ -216,8 +216,7 @@ class RedisBenchmark(Application):
         Called on a freshly-loaded instance after the run; missing or
         unparseable file → only runtime is recorded.
         """
-        stat_dict[f'{self.pkg_id}.runtime'] = getattr(
-            self, 'start_time', None)
+        stat_dict[f'{self.pkg_id}.runtime'] = self.runtime
 
         csv_path = self._csv_path()
         if not os.path.isfile(csv_path):
